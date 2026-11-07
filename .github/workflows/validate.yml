@@ -1,0 +1,21 @@
+name: validate
+on: [pull_request, push]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 tools/hackindex.py --selftest
+      # --allow-empty comes off when the first entries land.
+      - run: python3 tools/hackindex.py validate --allow-empty
+      - name: check changed entries' downloads
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --depth=1 origin "${{ github.base_ref }}"
+          files=$(git diff --name-only --diff-filter=AM "origin/${{ github.base_ref }}" -- 'entries/*.json')
+          if [ -n "$files" ]; then python3 tools/hackindex.py check-remote $files; fi

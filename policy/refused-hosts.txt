@@ -1,0 +1,6 @@
+# Hosts that can never appear in an entry (page, patch or thumbnail), subdomains included.
+# Reason: they distribute ROMs or pre-patched ROMs (staticR romhack scope §5a, 2026-11-06).
+# Keep in step with the launcher's refusal list in staticr_launcher core/hack_sources.py.
+cdromance.org
+cdromance.com
+romspure.cc
