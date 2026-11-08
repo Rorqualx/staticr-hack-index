@@ -191,6 +191,31 @@ keep-original. 4-6 are measurement first.
 
 Out of scope: class C (code patches) needs a recompile per hack. R2 publishing decisions are below.
 
+### R1b results (2026-11-07)
+
+- Steps 2+3 built: staticR commit e4185190 (branch hack-r1b-ppf, not landed). PPF 1.0/2.0/3.0
+  reader; an IPS or PPF is tried on every base you have (stored ROM, kept cart, Patcher64+'s
+  base); one fit asks yes/no, several ask you to pick, none is refused with the reason per base.
+  A PPF's own record (size, block check, undo) only rules bases out; it never skips the question.
+  Measured on MM: pl.ppf asks once and builds the BPS the R1 run loaded; the other 17 Patcher64+
+  PPFs are refused before any question (evidence 3f74858c).
+- Step 4 skipped: all five table-moving patches (de/es/fr/pt-BR/redux) are class C.
+- Step 6 (evidence 3d2cac23, candidates; 91c5798f, the run): two class-A OoT 1.2 hacks found
+  outside RHDN's live site (archive.org RHDN mirror `rhdn-20210914`), both PPF 3.0 for the 1.2
+  cart 41b3bdc4:
+  - **Play as Ganondorf** (XModxGodX): changes files 502/503 only. Through install_patch only
+    the cart fits (asked yes/no; 4.2 s to the question, 3.2 s to install: 231,321 records and
+    pure-Python Yaz0). In the OoT port (muted, background): "Loading mod
+    rompatch_play_as_ganondorf_in_oot"; RDRAM at VI 600-2400 holds 8/8 Ganondorf windows of
+    file 502 and no Link ones; a stock run holds the reverse.
+  - **Waluigi Voice Patch** alone: class A (files 3, 5, and data bytes in file 27 outside any
+    recompiled function); meant to follow the Waluigi model patch (class B: rows moved out of
+    order, refused); not run.
+  - No class-A MM US hack found outside Patcher64+ (Razor Sword IPS, Pumkin Tower: C).
+  - Most fan translations are C (Swedish, Greek: code/font changes) - measured for those two.
+  - An IPS for another release can still class A (SadNES Italian: garbage text); IPS has no
+    base check, so the user's yes is the only guard.
+
 ## After R1: what makes the index publishable (R2)
 
 These need your decisions, so they are listed now:
