@@ -222,7 +222,7 @@ These need your decisions, so they are listed now:
 
 | Item | Needs |
 |---|---|
-| Public home for this repo (GitHub org/user), GitHub Pages or a release asset | where staticR goes public (no remote is configured today) |
+| Public home for this repo (GitHub org/user), GitHub Pages or a release asset | DONE 2026-11-07: github.com/Rorqualx/staticr-hack-index (public) |
 | Signing key (Ed25519) and who holds it; ideally a second keyholder | you |
 | Takedown contact address in `TAKEDOWN.md`; maintainer handles in `.github/CODEOWNERS` | you |
 | Launcher reader: fetch with ETag, cache, signature and `expires` check, refuse an older index, apply `revoked` | staticR R2 work; the built-in row then gets its URL |

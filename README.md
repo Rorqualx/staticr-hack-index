@@ -3,7 +3,7 @@
 The list of ROM hacks the staticR launcher can show on its Mods page. It lives here, apart from the
 staticR code, so a takedown or licence complaint about one entry can never reach the port code.
 
-Status: **set up, no entries yet, not published.** The launcher's built-in "staticR hack index"
+Status: **set up, no entries yet.** Repo: https://github.com/Rorqualx/staticr-hack-index. The launcher's built-in "staticR hack index"
 source has no URL until the first signed `index.json` is published (see `docs/next-task.md`).
 
 ## What goes in
