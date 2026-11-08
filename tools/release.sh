@@ -24,8 +24,8 @@ done
 [ -z "$(git status --porcelain -- entries revoked.json registry keys)" ] \
   || { echo "release: entries/revoked/registry/keys have uncommitted changes" >&2; exit 1; }
 today="$(date -u +%Y-%m-%d)"
-"$PY" tools/hackindex.py validate "${empty[@]}"
-"$PY" tools/hackindex.py build --generated "$today" "${empty[@]}" --out dist/index.json
+"$PY" tools/hackindex.py validate ${empty[@]+"${empty[@]}"}
+"$PY" tools/hackindex.py build --generated "$today" ${empty[@]+"${empty[@]}"} --out dist/index.json
 "$PY" tools/hackindex.py sign dist/index.json "${key[@]}"
 "$PY" tools/hackindex.py verify dist/index.json
 sha="$(git rev-parse --short HEAD)"
