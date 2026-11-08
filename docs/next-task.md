@@ -1,7 +1,8 @@
 # Next task: prove a hack loads (R0 + R1)
 
-Status 2026-11-07: scope only, not started. Repo facts cite file:line in the staticR checkout at main
-722d2655; anything else is marked hypothesis.
+Status 2026-11-07: R0 landed (staticR main 80fc9154), R1 landed (efebd002), keep-original landed
+(75347fbc). R1b (the open items) is scoped below. Repo facts cite file:line in the staticR
+checkout at main 722d2655 unless a later commit is named; anything else is marked hypothesis.
 
 ## Why this is next
 
@@ -79,6 +80,116 @@ Gate:
 - the code patch refused, test id cited.
 
 Size: two to three days, most of it choosing patches and capturing evidence.
+
+## R1 results (2026-11-07, MM US, installed port bin e661b137)
+
+Evidence ids are staticR evidence-store sha256 prefixes. All runs muted, background, under the
+game-run lock and a rig booking.
+
+### Base forms (measured)
+
+| Base a patch names | What it is | Usable today? |
+|---|---|---|
+| port's stored ROM a1a7e48c (49128448 B) | zeldaret per-file decompressed | yes, applies as is |
+| Patcher64+ "Decompressed" (CRC32 33751c40, 64 MiB) | retail d6133ace + `00` pad to 64 MiB, each present DMA file written decompressed at its vrom, header CRC recalculated (ndec.exe layout) | only by rebuilding that base from the retail ROM |
+| retail compressed d6133ace (32 MiB) | the cart dump | only by applying to the retail ROM, then per-file Yaz0 decompress (reproduces a1a7e48c exactly from clean retail) |
+
+Both conversions need the user's original retail ROM, which the launcher doesn't keep (onboarding
+stores only the decompressed image). Q4: a retail-base patch does carry over (kz_practice, below),
+except bytes a hack puts outside the DMA files, which the conversion drops.
+
+### Candidates (Patcher64+ github.com/Admentus64/Patcher64Plus-Tool @ master, MM)
+
+22 whole-ROM patches classed with `bin/hack_classify.py` against their own base:
+
+| class | count | patches |
+|---|---|---|
+| A | 1 | pl.ppf (Polish text, sha256 4a7e33da…) |
+| B | 1 | pirates_fortress_interior.bps (021944e0…): 3 files resized in place |
+| C | 20 | master_quest (115 code bytes, 19 fns), zelda_revival, masked_quest, redux, widescreen, the 5 other language PPFs (26-61 code bytes each), and every small "Optional" PPF (chest, wallet, kegs, spin, hearts, icons, spider house, text_commands) |
+
+Full table with sha256: evidence 0687c52c (r1-classify-table.tsv). Most small "option" hacks are
+code. Only one real class-A hack was found, not three: an honest shortfall against the R1 gate.
+
+### Runs
+
+| What | Result | Evidence |
+|---|---|---|
+| Polish .nrm tagged `game_id` mm-n64-us (what R0's install_patch wrote) | refused by the host: "Mod is for a different game (mm-n64-us)". R0 bug | log in 0687c52c (run-20261107-115936) |
+| same .nrm tagged mm (the seam's mod_game_id) | "Loading mod rompatch_mm_pl"; RDRAM at VI 600-2400 holds Polish bytes of files 25 + 1127 and none of the English; stock run the reverse | RDRAM 1a8958f0 (mod), 7a3e1b3d (stock) |
+| pirates_fortress_interior (B) | loads; the RAM copy of dmadata (RDRAM 0x9F8B0) carries 3/3 patched rows; the scene itself is not reachable without play, so it is not shown drawing | RDRAM 44adc8b2, log b0793e4f |
+| fixed install_patch, end to end | Polish installs tagged mm and loads (Polish in RDRAM); kz_practice (retail base, decompressed) refused: 17 recompiled functions | RDRAM 5453c393, bundle 0e817d80 |
+
+### Q7 (librecomp 40868f2 source)
+
+- `get_rom()` is the patched image: the patch applies to it and `set_rom_contents` swaps it in
+  (`librecomp/src/mods.cpp:1661-1667`); PI reads come from it.
+- No header CRC check at run time. The only hash is XXH3 on the stored ROM, before patching
+  (`recomp.cpp:188`). A 64 MiB patched target booted (B run).
+
+### Built (staticR main efebd002)
+
+- `staticr_mods/hackclass.py` + `bin/hack_classify.py` (`--selftest` 16/16), ranges
+  `configs/hacks/{oot,mm}.coderanges.tsv` from the installed emits (`ranges --check` detects
+  stale ones). A file holding recompiled functions that moves in ROM is C: librecomp's
+  `load_overlays` finds an overlay by the ROM address it is DMA'd from (`overlays.cpp:215`).
+- `bin/gen-hack-support.py` bundles each port's mod id (from `host/<short>_rt64_host.cpp`, seam
+  must agree; 16 ports) + gzipped ranges into the launcher. `install_patch` wraps with that id,
+  refuses C, installs B only on MM (the measured port), refuses a port with no known id.
+
+### Keep-original (staticR main 75347fbc)
+
+User, 2026-11-07: "yes keep og". Onboarding a retail Zelda64 cart decompresses it, checks the
+result against the pin and keeps the cart as `rom_original.z64`. `install_patch` picks the base by
+the patch's source CRC: the stored ROM, the kept cart, or Patcher64+'s base rebuilt from the cart.
+Retail MM onboards to a1a7e48c in 1.46 s. Patcher64+'s pirates_fortress_interior installs
+unconverted and loads (RDRAM 887ab213, bundle 963a6400). kz_practice and master_quest are refused
+for writing outside the files. The installed launcher's MM was set up again from the cart on
+2026-11-07, so it keeps d6133ace.
+
+## R1b. The open items (scope, 2026-11-07)
+
+Four items were left open after keep-original. Measured facts cite an evidence id; everything else
+is marked hypothesis.
+
+### Facts the scope rests on
+
+- All 18 Patcher64+ MM PPFs are PPF 3.0, image type 0, no undo data; 2 (redux, text_commands)
+  carry the 1024-byte block check. PPF names no base: no CRC, no size.
+- Only pl.ppf is class A. The other 17 are C (R1 table, evidence 0687c52c). Reading PPF unlocks one
+  MM hack today, and the format for later ones.
+- Applying a Patcher64+ PPF straight to the stored ROM gives the same image as the cart route
+  for 10 of 18. One more (no_quick_spin_and_smaller_spin) differs only in the header CRC bytes it
+  writes. pl differs by 14 bytes in an absent-row slot, which the cart route drops. widescreen
+  moves a file past the stored ROM's end. de/es/fr/pt-BR/redux leave no findable dmadata table on
+  the cart route (evidence 72ee908a). So a PPF that leaves the table alone needs no cart. One that
+  moves files needs the cart route, or the table rewrite has to be followed.
+- IPS, like PPF without undo data, is absolute offsets with no base check. One base-inference
+  rule can serve both.
+- OoT (measured 2026-11-07, evidence b0134455): a US 1.2 cart (sha1 41b3bdc4): onboarding it reproduces the port's ROM 539f3faf exactly (1.6 s).
+  The installed launcher's OoT was set up again from it and keeps the cart. Patcher64+'s
+  1.2 base built from it (CRC32 08e42fcb) is the source of its `us_rev2_to_us_rev1` downgrade and
+  of `Decompressed/widescreen.bps`. Its OoT hacks bombiwa and master_quest target the 1.0 layout
+  (b94d8af1, reached by its own downgrade chain), and gz_practice_rev0 targets the 1.0 cart
+  (cd16c529). So most Patcher64+ OoT hacks are for 1.0. The one 1.2 patch read (widescreen) is
+  class C (20 functions).
+
+### Steps
+
+| # | Item | What | Done when |
+|---|---|---|---|
+| 1 | Index notes | Commit this file (R1 results, keep-original, R1b) in this repo | committed |
+| 2 | PPF reader | `staticr_mods/patchfile.py`: clean-room PPF 1.0/2.0/3.0 decode (block check and undo kept as data), `detect_format`, a `--selftest` fixture per version. `install_patch` takes `.ppf` | pl.ppf installs through the launcher and loads (Polish bytes in RDRAM, as R1). The 17 C patches are refused with R1's message |
+| 3 | Base inference for base-less patches (PPF, IPS) | Apply to each candidate base the user has: stored ROM, kept cart, Patcher64+ base. A candidate passes when the result keeps a readable table, writes nothing outside files, and is not a no-op. Undo data or a block check, when present, must match the base. Exactly one pass → use it. Several pass → the user picks from those bases (user, 2026-11-07: "ask user to pick"). None → refuse as today | MM corpus: every PPF picks the base the R1 table says, or offers the choice. A synthetic IPS for the cart picks the cart. An ambiguous synthetic patch asks, and the picked base installs |
+| 4 | Table-moving patches | Hypothesis to measure first: de/es/fr/pt-BR/redux rewrite or move dmadata. Find where the patched table is (hackclass.find_dma scans; zelda64.read_dma reads the fixed slot) and follow it in `to_port_layout` | the 5 patches map back to the port layout or are refused with a measured reason (all are class C today, so nothing new installs) |
+| 5 | OoT cart | DONE 2026-11-07 (facts above, evidence b0134455) | 1.2 onboarding measured; Patcher64+ OoT bases named by CRC |
+| 6 | Class-A hacks | Two more class-A hacks from a source other than RHDN (403 to scripts): another Patcher64+-like tool, or ones you point at | 2 more class-A entries measured loading, or the shortfall recorded |
+
+Order: 1, 2+3 together (one launcher change, one land), 4 only if 3's corpus run shows the table
+case matters for an A or B patch, 5 and 6 in parallel with 2+3. Cost: 2+3 is about the size of
+keep-original. 4-6 are measurement first.
+
+Out of scope: class C (code patches) needs a recompile per hack. R2 publishing decisions are below.
 
 ## After R1: what makes the index publishable (R2)
 
