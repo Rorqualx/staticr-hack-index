@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "title": "Polish Translation",
+  "authors": [
+    "RPG",
+    "GhostlyDark"
+  ],
+  "version": "1.1",
+  "game": "mm-n64-us",
+  "base": {
+    "name": "Patcher64+ decompressed base of Legend of Zelda, The - Majora's Mask (USA)",
+    "sha1": "02628b1521ab6faf9596d072a02f47291df2c1f1",
+    "form": "decompressed",
+    "byte_order": "z64",
+    "size": 67108864
+  },
+  "patch": {
+    "format": "ppf",
+    "url": "https://raw.githubusercontent.com/Admentus64/Patcher64Plus-Tool/848109a4ffe727acfaf00f617507a4b3379c3841/Files/Games/Majora%27s%20Mask/Languages/pl.ppf",
+    "sha256": "4a7e33da43a0d216e8d0c8dd8b92bafd6c93750ba7fbee3b481b1d736559ca33",
+    "size": 788199
+  },
+  "page": "https://github.com/Admentus64/Patcher64Plus-Tool",
+  "tags": [
+    "translation",
+    "polish"
+  ],
+  "license_note": "Shipped in the Patcher64+ Tool repository (GPL-3.0). Linked at a pinned commit, not mirrored. Credits there: RPG (v1.1) and GhostlyDark (improvements).",
+  "redistribute": false,
+  "compat": {
+    "class": "A",
+    "measured_on": {
+      "port_build": "54b75761",
+      "evidence": "e315c77e74a188a5198d778c8a8822c099c8b2e4ad2842ea1c3ad0bc44046c9d"
+    }
+  },
+  "notes": "Polish text and HUD labels. Fits the launcher's stored ROM; the launcher asks once before installing."
+}

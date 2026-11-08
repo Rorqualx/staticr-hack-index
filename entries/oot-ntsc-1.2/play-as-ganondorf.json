@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "title": "Play as Ganondorf",
+  "authors": [
+    "XModxGodX",
+    "N64Mods",
+    "Flotonic"
+  ],
+  "version": "1.0",
+  "released": "2018-02-19",
+  "game": "oot-ntsc-1.2",
+  "base": {
+    "name": "Legend of Zelda, The - Ocarina of Time (USA) (Rev B)",
+    "sha1": "41b3bdc48d98c48529219919015a1af22f5057c2",
+    "form": "retail",
+    "byte_order": "z64",
+    "size": 33554432
+  },
+  "patch": {
+    "format": "ppf",
+    "url": "https://archive.org/download/rhdn-20210914/RHDN-20210914.zip/hacks%2FN64%2FThe%20Legend%20of%20Zelda_%20Ocarina%20of%20Time%2FPlay%20as%20Ganondorf%20in%20Ocarina%20of%20Time___1_0%2FPlay%20as%20Ganondorf.zip",
+    "sha256": "e2e56ec4e02f1eb69e6e1a66a86c519b2b641dbdac132a1f2501213ed5ca8a7a",
+    "size": 17865708,
+    "archive": "zip",
+    "member": "Play as Ganondorf in OoT.PPF"
+  },
+  "page": "https://archive.org/details/rhdn-20210914",
+  "tags": [
+    "character",
+    "model"
+  ],
+  "license_note": "No license stated. Published on romhacking.net (hack 3887); linked from the Internet Archive's copy of that site (rhdn-20210914), not mirrored.",
+  "redistribute": false,
+  "compat": {
+    "class": "A",
+    "measured_on": {
+      "port_build": "3d610255",
+      "evidence": "fcf9dcda45c824ccb9d8a00351c4ea29a109ab47b204d523fdf3c230f56ebc44"
+    }
+  },
+  "notes": "Young Link becomes a Stalchild and adult Link becomes Ganondorf (files 502 and 503). Needs the original cart, kept at setup. Readme: some items look glitched when Ganondorf uses them."
+}
