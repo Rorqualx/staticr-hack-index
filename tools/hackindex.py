@@ -15,7 +15,7 @@
 verify use the `cryptography` package (Apache-2.0 OR BSD-3-Clause) for Ed25519.
 
     hackindex.py validate [--root DIR] [--allow-empty] [--json]
-    hackindex.py build --generated YYYY-MM-DD [--expires-days N] [--out FILE] [--allow-empty]
+    hackindex.py build --generated YYYY-MM-DD [--expires-days N] [--serial N] [--out FILE] [--allow-empty]
     hackindex.py keygen --name NAME (--keychain | --out FILE)   # writes keys/NAME.pub
     hackindex.py sign INDEX (--keychain KEY_ID | --key-file FILE)  # writes INDEX.sig
     hackindex.py verify INDEX [--sig FILE]                          # against keys/*.pub
@@ -392,11 +392,15 @@ def cmd_validate(a: argparse.Namespace) -> int:
 
 
 def build_bytes(entries: dict[str, dict], revoked: list[dict], generated: str,
-                expires_days: int) -> bytes:
+                expires_days: int, serial: int = 1) -> bytes:
+    """The index bytes. ``serial`` (the build time in Unix seconds by default) only ever grows:
+    the launcher refuses an index with a lower serial than one it has seen (a replayed old
+    index can't bring back a revoked entry, even one published the same day)."""
     gen = dt.date.fromisoformat(generated)
     doc = {
         "schema": SCHEMA,
         "source": SOURCE_ID,
+        "serial": serial,
         "generated": gen.isoformat(),
         "expires": (gen + dt.timedelta(days=expires_days)).isoformat(),
         "entries": [{"id": eid, **entries[eid]} for eid in sorted(entries)],
@@ -418,7 +422,10 @@ def cmd_build(a: argparse.Namespace) -> int:
         emit(rep, a.json)
         print("FAIL: not built", file=sys.stderr)
         return 1
-    blob = build_bytes(entries, revoked, a.generated, a.expires_days)
+    serial = a.serial if a.serial is not None else int(dt.datetime.now(dt.timezone.utc).timestamp())
+    if serial <= 0:
+        raise UsageError("--serial must be positive")
+    blob = build_bytes(entries, revoked, a.generated, a.expires_days, serial)
     out = a.out or (a.root / "dist" / "index.json")
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_suffix(".tmp")
@@ -772,11 +779,11 @@ def selftest() -> int:
     @case("build is deterministic and sorted", "positive")
     def _() -> bool:
         ents = {"oot-ntsc-1.2/b": good, "oot-ntsc-1.2/a": ent_ips}
-        x = build_bytes(ents, [], "2026-11-07", 30)
-        y = build_bytes(dict(reversed(list(ents.items()))), [], "2026-11-07", 30)
+        x = build_bytes(ents, [], "2026-11-07", 30, 7)
+        y = build_bytes(dict(reversed(list(ents.items()))), [], "2026-11-07", 30, 7)
         doc = json.loads(x)
         return x == y and [e["id"] for e in doc["entries"]] == ["oot-ntsc-1.2/a", "oot-ntsc-1.2/b"] \
-            and doc["expires"] == "2026-12-07"
+            and doc["expires"] == "2026-12-07" and doc["serial"] == 7
 
     @case("CLI: validate exits 1 on a bad tree", "negative")
     def _() -> bool:
@@ -873,6 +880,7 @@ def main(argv: list[str]) -> int:
         if name == "build":
             p.add_argument("--generated", required=True)
             p.add_argument("--expires-days", type=int, default=180)
+            p.add_argument("--serial", type=int, help="default: now, in Unix seconds")
             p.add_argument("--out", type=Path)
         if name == "check-remote":
             p.add_argument("entries", nargs="+")

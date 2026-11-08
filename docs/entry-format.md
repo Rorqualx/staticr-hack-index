@@ -54,9 +54,11 @@ patch); **B** data that moves or resizes files (needs R1 measurement per port); 
 
 ## Compiled index (what the launcher reads)
 
-`build` writes `dist/index.json`: `{"schema", "source": "staticr-index", "generated", "expires",
+`build` writes `dist/index.json`: `{"schema", "source": "staticr-index", "serial", "generated", "expires",
 "entries": [{"id", ...entry}], "revoked": [...]}`, sorted, compact, byte-identical for the same
-input and `--generated` date. The index expires 180 days after its date by default.
+input, `--generated` date and `--serial`. `serial` (the build time in Unix seconds unless given)
+only grows: the launcher refuses an index with a lower serial than one it has accepted. The
+index expires 180 days after its date by default.
 
 ## Signing and publishing
 
