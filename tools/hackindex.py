@@ -5,16 +5,20 @@
 # purpose: validate staticR hack index entries, compile them into index.json, refresh the game list
 # when: before a PR merges (validate), when publishing (build), after games.toml changes (sync-games)
 # inputs: entries/<game-id>/<slug>.json, registry/games.tsv, policy/refused-hosts.txt, revoked.json
-# outputs: counts on stdout (--json for machine output); build writes dist/index.json; exit 0 ok, 1 failed check, 2 usage, 77 skipped (no network)
+# outputs: counts on stdout (--json for machine output); build writes dist/index.json; sign writes index.json.sig; exit 0 ok, 1 failed check, 2 usage, 77 skipped (no network)
 # selftest: --selftest (synthetic fixtures: a good entry; refused host, ROM URL, unknown game, bad hash, duplicate, revoked, path mismatch, unmeasured-with-evidence; payload magic; build determinism)
 # status: unverified
 # supersedes: -
 # distinct-from: staticR bin/ tools because this repo is standalone and must run without a staticR checkout
 # mismatch-exit: 1
-"""staticR hack index tool. Standard library only (Python 3.11+), MIT.
+"""staticR hack index tool (Python 3.11+), MIT. Standard library only, except that keygen/sign/
+verify use the `cryptography` package (Apache-2.0 OR BSD-3-Clause) for Ed25519.
 
     hackindex.py validate [--root DIR] [--allow-empty] [--json]
     hackindex.py build --generated YYYY-MM-DD [--expires-days N] [--out FILE] [--allow-empty]
+    hackindex.py keygen --name NAME (--keychain | --out FILE)   # writes keys/NAME.pub
+    hackindex.py sign INDEX (--keychain KEY_ID | --key-file FILE)  # writes INDEX.sig
+    hackindex.py verify INDEX [--sig FILE]                          # against keys/*.pub
     hackindex.py check-remote ENTRY.json...      # downloads each patch; checks size, sha256, payload
     hackindex.py sync-games PATH/TO/staticR/configs/games.toml
     hackindex.py --selftest
@@ -30,6 +34,7 @@ import datetime as dt
 import hashlib
 import io
 import json
+import os
 import re
 import sys
 import tempfile
@@ -424,6 +429,172 @@ def cmd_build(a: argparse.Namespace) -> int:
     return 0
 
 
+# ---------------------------------------------------------------- signing (Ed25519)
+#
+# index.json.sig is JSON: {"schema": 1, "key_id": <16 hex>, "sig": <base64 Ed25519 signature of
+# the exact index.json bytes>}. key_id = the first 16 hex digits of sha256(raw public key).
+# keys/<name>.pub is one line: "ed25519 <base64 raw public key> <key_id> <name>". The launcher
+# pins the same public keys; a new key reaches users only with a launcher update.
+
+KEYCHAIN_SERVICE = "staticr-hack-index"
+SIG_SCHEMA = 1
+
+
+def _ed25519():
+    try:
+        from cryptography.hazmat.primitives.asymmetric import ed25519
+    except ImportError as e:  # validate/build never need it
+        raise UsageError("signing needs the `cryptography` package: pip install cryptography") from e
+    return ed25519
+
+
+def key_id(public_raw: bytes) -> str:
+    return hashlib.sha256(public_raw).hexdigest()[:16]
+
+
+def _raw_public(priv) -> bytes:
+    from cryptography.hazmat.primitives import serialization
+    return priv.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+
+
+def _raw_private(priv) -> bytes:
+    from cryptography.hazmat.primitives import serialization
+    return priv.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw,
+                              serialization.NoEncryption())
+
+
+def pub_line(public_raw: bytes, name: str) -> str:
+    import base64
+    return f"ed25519 {base64.b64encode(public_raw).decode()} {key_id(public_raw)} {name}\n"
+
+
+def read_pubkeys(keys_dir: Path) -> dict[str, bytes]:
+    """key_id -> raw public key, from keys/*.pub (a malformed file is an error, not skipped)."""
+    import base64
+    out: dict[str, bytes] = {}
+    for f in sorted(keys_dir.glob("*.pub")):
+        parts = f.read_text("utf-8").split()
+        if len(parts) != 4 or parts[0] != "ed25519":
+            raise UsageError(f"{f}: not 'ed25519 <base64> <key_id> <name>'")
+        raw = base64.b64decode(parts[1], validate=True)
+        if len(raw) != 32 or key_id(raw) != parts[2]:
+            raise UsageError(f"{f}: key_id does not match the key")
+        out[parts[2]] = raw
+    return out
+
+
+def sign_bytes(blob: bytes, private_raw: bytes) -> bytes:
+    import base64
+    priv = _ed25519().Ed25519PrivateKey.from_private_bytes(private_raw)
+    doc = {"schema": SIG_SCHEMA, "key_id": key_id(_raw_public(priv)),
+           "sig": base64.b64encode(priv.sign(blob)).decode()}
+    return (json.dumps(doc, sort_keys=True, separators=(",", ":")) + "\n").encode()
+
+
+def verify_bytes(blob: bytes, sig_doc: bytes, pubkeys: dict[str, bytes]) -> str:
+    """The key_id that signed ``blob``; UsageError-free: raises ValueError on any failure."""
+    import base64
+    doc = json.loads(sig_doc)
+    if not isinstance(doc, dict) or doc.get("schema") != SIG_SCHEMA:
+        raise ValueError("unknown signature schema")
+    kid = doc.get("key_id")
+    if kid not in pubkeys:
+        raise ValueError(f"signed by an unknown key {kid!r}")
+    from cryptography.exceptions import InvalidSignature
+    pub = _ed25519().Ed25519PublicKey.from_public_bytes(pubkeys[kid])
+    try:
+        pub.verify(base64.b64decode(doc.get("sig", ""), validate=True), blob)
+    except (InvalidSignature, ValueError) as e:
+        raise ValueError("bad signature") from e
+    return kid
+
+
+def _keychain(*args: str) -> str:
+    import subprocess
+    r = subprocess.run(["security", *args], capture_output=True, text=True, check=False)
+    if r.returncode != 0:
+        raise UsageError(f"security {args[0]} failed: {r.stderr.strip()}")
+    return r.stdout.strip()
+
+
+def _keychain_store(account: str, label: str, secret: str) -> None:
+    """Add the key through `security -i` on stdin, so the secret is never in any process's
+    argv (where `ps` would show it) or in a file."""
+    import shlex
+    import subprocess
+    line = " ".join(["add-generic-password", "-U", "-s", KEYCHAIN_SERVICE, "-a", account,
+                     "-l", shlex.quote(label), "-w", secret]) + "\n"
+    r = subprocess.run(["security", "-i"], input=line, capture_output=True, text=True,
+                       check=False)
+    if r.returncode != 0 or "error" in (r.stdout + r.stderr).lower():
+        raise UsageError(f"storing the key in the Keychain failed: {(r.stdout + r.stderr).strip()}")
+
+
+def cmd_keygen(a: argparse.Namespace) -> int:
+    import base64
+    if not SLUG.fullmatch(a.name):
+        raise UsageError("--name must be a slug (a-z0-9-)")
+    pub_file = a.root / "keys" / f"{a.name}.pub"
+    if pub_file.exists():
+        raise UsageError(f"{pub_file} exists: a key is never replaced in place")
+    priv = _ed25519().Ed25519PrivateKey.generate()
+    raw, pub = _raw_private(priv), _raw_public(priv)
+    kid = key_id(pub)
+    if a.keychain:
+        _keychain_store(kid, f"staticR hack index signing key {a.name}",
+                        base64.b64encode(raw).decode())
+        where = f"macOS Keychain (service {KEYCHAIN_SERVICE}, account {kid})"
+    else:
+        out = Path(a.out)
+        if out.exists():
+            raise UsageError(f"{out} exists")
+        fd = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with open(fd, "w", encoding="utf-8") as f:
+            f.write(f"ed25519-private {base64.b64encode(raw).decode()} {kid} {a.name}\n")
+        where = str(out)
+    pub_file.parent.mkdir(parents=True, exist_ok=True)
+    pub_file.write_text(pub_line(pub, a.name), "utf-8")
+    emit(Report(), a.json, {"key_id": kid, "public": str(pub_file), "private": where})
+    return 0
+
+
+def _private_for(a: argparse.Namespace) -> bytes:
+    import base64
+    if a.keychain:
+        return base64.b64decode(_keychain("find-generic-password", "-s", KEYCHAIN_SERVICE,
+                                          "-a", a.keychain, "-w"), validate=True)
+    parts = Path(a.key_file).read_text("utf-8").split()
+    if len(parts) != 4 or parts[0] != "ed25519-private":
+        raise UsageError(f"{a.key_file}: not an ed25519-private key file")
+    return base64.b64decode(parts[1], validate=True)
+
+
+def cmd_sign(a: argparse.Namespace) -> int:
+    blob = Path(a.index).read_bytes()
+    pubkeys = read_pubkeys(a.root / "keys")
+    sig = sign_bytes(blob, _private_for(a))
+    kid = verify_bytes(blob, sig, pubkeys)  # only a key the repo publishes may sign
+    out = Path(a.index + ".sig")
+    out.write_bytes(sig)
+    emit(Report(), a.json, {"sig": str(out), "key_id": kid,
+                            "index_sha256": hashlib.sha256(blob).hexdigest()})
+    return 0
+
+
+def cmd_verify(a: argparse.Namespace) -> int:
+    blob = Path(a.index).read_bytes()
+    sig = Path(a.sig or a.index + ".sig").read_bytes()
+    try:
+        kid = verify_bytes(blob, sig, read_pubkeys(a.root / "keys"))
+    except ValueError as e:
+        print(f"FAIL: {e}", file=sys.stderr)
+        return 1
+    doc = json.loads(blob)
+    emit(Report(), a.json, {"key_id": kid, "generated": doc.get("generated"),
+                            "expires": doc.get("expires"), "entries": len(doc.get("entries", []))})
+    return 0
+
+
 def cmd_check_remote(a: argparse.Namespace) -> int:
     rep = Report()
     for p in a.entries:
@@ -625,6 +796,53 @@ def selftest() -> int:
                                capture_output=True, text=True, check=False)
             return r.returncode == 0
 
+    try:
+        _ed25519()
+        have_crypto = True
+    except UsageError:
+        have_crypto = False
+    if have_crypto:
+        ed = _ed25519()
+        k1, k2 = ed.Ed25519PrivateKey.generate(), ed.Ed25519PrivateKey.generate()
+        keys = {key_id(_raw_public(k1)): _raw_public(k1)}  # only k1 is published
+        blob = build_bytes({"oot-ntsc-1.2/a": good}, [], "2026-11-07", 180)
+        sig = sign_bytes(blob, _raw_private(k1))
+
+        @case("sign/verify: a published key's signature verifies", "positive")
+        def _() -> bool:
+            return verify_bytes(blob, sig, keys) == key_id(_raw_public(k1))
+
+        def _refused(b: bytes, sg: bytes) -> bool:
+            try:
+                verify_bytes(b, sg, keys)
+            except ValueError:
+                return True
+            return False
+
+        @case("sign/verify: one changed index byte is refused (mutation)", "negative")
+        def _() -> bool:
+            return _refused(blob.replace(b"2026-11-07", b"2026-11-08", 1), sig)
+
+        @case("sign/verify: an unpublished key's signature is refused", "negative")
+        def _() -> bool:
+            return _refused(blob, sign_bytes(blob, _raw_private(k2)))
+
+        @case("pub file round-trips and a wrong key_id is refused", "negative")
+        def _() -> bool:
+            with tempfile.TemporaryDirectory() as t:
+                d = Path(t)
+                (d / "a.pub").write_text(pub_line(_raw_public(k1), "a"))
+                ok = read_pubkeys(d) == keys
+                (d / "b.pub").write_text(pub_line(_raw_public(k2), "b").replace(
+                    key_id(_raw_public(k2)), "0" * 16))
+                try:
+                    read_pubkeys(d)
+                except UsageError:
+                    return ok
+                return False
+    else:
+        print("SKIP sign/verify cases: `cryptography` is not installed", file=sys.stderr)
+
     pols = {p for _, p, _ in cases}
     if pols != {"positive", "negative"}:
         print("selftest: suite needs both polarities", file=sys.stderr)
@@ -646,7 +864,7 @@ def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="hackindex.py")
     ap.add_argument("--selftest", action="store_true")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("validate", "build", "check-remote", "sync-games"):
+    for name in ("validate", "build", "check-remote", "sync-games", "keygen", "sign", "verify"):
         p = sub.add_parser(name)
         p.add_argument("--root", type=Path, default=ROOT)
         p.add_argument("--json", action="store_true")
@@ -654,16 +872,31 @@ def main(argv: list[str]) -> int:
             p.add_argument("--allow-empty", action="store_true")
         if name == "build":
             p.add_argument("--generated", required=True)
-            p.add_argument("--expires-days", type=int, default=30)
+            p.add_argument("--expires-days", type=int, default=180)
             p.add_argument("--out", type=Path)
         if name == "check-remote":
             p.add_argument("entries", nargs="+")
         if name == "sync-games":
             p.add_argument("games_toml")
+        if name == "keygen":
+            p.add_argument("--name", required=True)
+            g = p.add_mutually_exclusive_group(required=True)
+            g.add_argument("--keychain", action="store_true", help="store the private key in "
+                           "the macOS Keychain")
+            g.add_argument("--out", help="write the private key to this new file (mode 600)")
+        if name in ("sign", "verify"):
+            p.add_argument("index")
+        if name == "sign":
+            g = p.add_mutually_exclusive_group(required=True)
+            g.add_argument("--keychain", metavar="KEY_ID")
+            g.add_argument("--key-file")
+        if name == "verify":
+            p.add_argument("--sig")
     a = ap.parse_args(argv)
     try:
         return {"validate": cmd_validate, "build": cmd_build, "check-remote": cmd_check_remote,
-                "sync-games": cmd_sync_games}[a.cmd](a)
+                "sync-games": cmd_sync_games, "keygen": cmd_keygen, "sign": cmd_sign,
+                "verify": cmd_verify}[a.cmd](a)
     except UsageError as e:
         print(f"usage error: {e}", file=sys.stderr)
         return 2

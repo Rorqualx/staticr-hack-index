@@ -56,4 +56,20 @@ patch); **B** data that moves or resizes files (needs R1 measurement per port); 
 
 `build` writes `dist/index.json`: `{"schema", "source": "staticr-index", "generated", "expires",
 "entries": [{"id", ...entry}], "revoked": [...]}`, sorted, compact, byte-identical for the same
-input and `--generated` date. Signing and the launcher's reader are the next task.
+input and `--generated` date. The index expires 180 days after its date by default.
+
+## Signing and publishing
+
+`tools/release.sh` builds, signs and publishes a GitHub release with `index.json` and
+`index.json.sig`. The launcher reads them from
+`https://github.com/Rorqualx/staticr-hack-index/releases/latest/download/` and accepts the index
+only when the signature checks against a key it pins:
+
+| key | key_id | private key |
+|---|---|---|
+| `keys/main.pub` | 24b60ded8adbf7b2 | the maintainer's macOS Keychain (service `staticr-hack-index`) |
+| `keys/backup.pub` | 475ca087cb0b43b3 | offline, with the maintainer; used only if the main key is lost |
+
+`index.json.sig` is `{"schema": 1, "key_id": ..., "sig": <base64 Ed25519 signature of the exact
+index.json bytes>}`. A new key reaches users only with a launcher release, so both keys are
+pinned from the start. `hackindex.py verify dist/index.json` checks a signature locally.
